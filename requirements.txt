@@ -1,0 +1,4 @@
+# Direct dependencies (source of truth). Transitive pins live in uv.lock.
+litellm==1.101.0
+chromadb==1.5.9
+python-dotenv==1.2.3

@@ -1,0 +1,9 @@
+[project]
+name = "rag-assessment"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "chromadb==1.5.9",
+    "litellm==1.101.0",
+    "python-dotenv==1.2.3",
+]
