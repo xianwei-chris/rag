@@ -45,16 +45,27 @@ Configuration is via environment variables; see `.env.example`.
 
 ## Evaluation
 
-Golden set: `eval/golden_set.json` — 20 questions (10 provided, 10 self-generated), each with `type`,
-`expected_status`, a claim-level `reference` answer, `missing_points` for partial cases, and
-`required_evidence` as chunking-independent `{source, quote}` groups.
+Golden sets live in `eval/golden/vN.json` — 20 questions (10 provided, 10 self-generated), each with
+`type`, `expected_behavior`, `expected_status`, a claim-level `reference` answer, `missing_points` for
+partial cases, and `required_evidence` as chunking-independent `{source, quote}` groups.
+
+**Versioning.** A golden set is immutable once a run has used it; changes go into a new version with an
+entry in `eval/golden/CHANGELOG.md`. Each run is a folder `eval/results/<name>/` holding only what
+cannot be recomputed:
+
+- `answers.jsonl` — per question: answer, status, citations, retrieved passages, raw output, scores;
+- `run.json` — provenance: golden version and hash, git commit, models, `top_k`, prompt hash.
+
+Tables and averages are derived from these (`eval/report.py`). Loading a run refuses to proceed if its
+golden version was edited afterwards. Commit before a run so the recorded commit reproduces the code.
 
 ```bash
-uv run python -m eval.check_golden                  # verify evidence quotes exist and fit in one chunk
-uv run python -m eval.run_eval                      # generate answers + score everything
-uv run python -m eval.run_eval --ids S02,C04        # subset
-uv run python -m eval.run_eval --skip-ragas         # rule-based checks only (no judge calls)
-uv run python -m eval.run_eval --reuse-answers eval/results/<run>/answers.jsonl   # re-score without regenerating
+uv run python -m eval.check_golden                          # verify evidence quotes (latest version)
+uv run python -m eval.run_eval --name 03-my-change          # generate answers + score, latest golden set
+uv run python -m eval.run_eval --name tmp --ids S02,C04     # subset
+uv run python -m eval.run_eval --name tmp --skip-ragas      # rule-based checks only (no judge calls)
+uv run python -m eval.run_eval --name <new-run> --golden v1 \
+    --reuse-answers eval/results/<old-run>                # re-score old answers on a new golden set
 ```
 
 | Score | Kind | Meaning |
@@ -69,7 +80,6 @@ uv run python -m eval.run_eval --reuse-answers eval/results/<run>/answers.jsonl 
 
 RAGAS metrics are skipped for expected `not supported` questions (no claims to score); those are
 judged by exact abstention. The judge model defaults to `gemini/gemini-3.5-flash` (`RAG_JUDGE_MODEL`).
-Each run writes `answers.jsonl`, `results.csv` and `summary.json` to `eval/results/<timestamp>/`.
 
 ### Notebook
 
