@@ -1,23 +1,30 @@
-"""Load saved evaluation runs and render the assignment's results table.
+"""Load saved evaluation runs and derive every table and average from them.
 
-Used by the notebook so it stays narrative rather than plumbing.
+A run folder stores only what cannot be recomputed:
+    answers.jsonl  per question: the system's output and its scores
+    run.json       provenance: golden version + hash, git commit, models, top_k, prompt hash
+Everything else (results table, averages, the assignment's table) is derived here, so stored
+numbers can never disagree with each other. A run is always displayed against the golden-set
+version it was scored with, so later iterations never change what an earlier run shows.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 
+from eval.versioning import golden_hash, load_golden
+
 EVAL_DIR = Path(__file__).parent
 RESULTS_DIR = EVAL_DIR / "results"
-GOLDEN_PATH = EVAL_DIR / "golden_set.json"
-REVIEW_PATH = EVAL_DIR / "manual_review.json"
 
 RULE_SCORES = ["status_correct", "evidence_recall", "rule_pass"]
 RAGAS_SCORES = ["faithfulness", "context_precision", "context_recall", "factual_correctness"]
+METRICS = RULE_SCORES + RAGAS_SCORES
 
 # Column names required by the assignment brief.
 TABLE_COLUMNS = [
@@ -31,12 +38,22 @@ TABLE_COLUMNS = [
 ]
 
 
+def _mean(values) -> float | None:
+    numbers = [float(v) for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
+    return round(sum(numbers) / len(numbers), 3) if numbers else None
+
+
+def overall(scores: list[dict]) -> dict:
+    """Mean of each metric over a list of per-question score dicts (None values skipped)."""
+    return {m: _mean(s.get(m) for s in scores) for m in METRICS} | {"n": len(scores)}
+
+
 @dataclass
 class Run:
     path: Path
-    results: pd.DataFrame
-    answers: dict[str, dict]
-    summary: dict
+    info: dict  # run.json
+    answers: dict[str, dict]  # answers.jsonl keyed by question id
+    golden: dict[str, dict]  # the golden version this run was scored against
 
     @property
     def name(self) -> str:
@@ -44,36 +61,74 @@ class Run:
 
     @property
     def config(self) -> dict:
-        return self.summary["config"]
+        """Flat view of what produced the run, for display and comparison."""
+        gen = self.info["generation"]
+        return {
+            "golden_version": self.info["golden_version"],
+            "top_k": gen["top_k"],
+            "llm_model": gen["llm_model"],
+            "embed_model": gen["embed_model"],
+            "judge_model": self.info["judge_model"],
+            "prompt_hash": gen["prompt_hash"],
+            "git_commit": gen["git_commit"],
+            "answers_from": gen.get("answers_from"),
+        }
 
+    @property
+    def results(self) -> pd.DataFrame:
+        """One row per question: identity, expectation, prediction and all scores."""
+        rows = []
+        for qid, answer in self.answers.items():
+            item = self.golden[qid]
+            rows.append(
+                {
+                    "id": qid,
+                    "source": item["source"],
+                    "type": item["type"],
+                    "expected_status": item["expected_status"],
+                    "predicted_status": answer["support_status"],
+                    **{m: answer["scores"].get(m) for m in METRICS},
+                    "latency_s": answer["latency_s"],
+                    "warnings": " | ".join(answer["warnings"]) or None,
+                }
+            )
+        return pd.DataFrame(rows)
 
-def load_golden(path: Path = GOLDEN_PATH) -> dict[str, dict]:
-    return {item["id"]: item for item in json.loads(path.read_text(encoding="utf-8"))}
+    def summary(self) -> dict:
+        """Averages overall and by source, type and expected status."""
+        frame = self.results
+
+        def means(group: pd.DataFrame) -> dict:
+            return overall(group[METRICS].to_dict("records"))
+
+        return {
+            "overall": means(frame),
+            "by_source": {k: means(g) for k, g in frame.groupby("source")},
+            "by_type": {k: means(g) for k, g in frame.groupby("type")},
+            "by_expected_status": {k: means(g) for k, g in frame.groupby("expected_status")},
+        }
 
 
 def list_runs(results_dir: Path = RESULTS_DIR) -> list[Path]:
-    return sorted(p for p in results_dir.iterdir() if (p / "results.csv").exists())
+    return sorted(p for p in results_dir.iterdir() if (p / "run.json").exists())
 
 
-def load_run(path: Path | str) -> Run:
-    path = Path(path)
-    answers = {
-        json.loads(line)["id"]: json.loads(line)
-        for line in (path / "answers.jsonl").read_text(encoding="utf-8").splitlines()
-    }
-    return Run(
-        path=path,
-        results=pd.read_csv(path / "results.csv"),
-        answers=answers,
-        summary=json.loads((path / "summary.json").read_text(encoding="utf-8")),
-    )
-
-
-def load_review(path: Path = REVIEW_PATH) -> dict[str, dict]:
-    """Manual pass/fail verdicts; the automated rule check cannot judge expected behaviour."""
+def load_run(name_or_path: Path | str) -> Run:
+    path = Path(name_or_path)
     if not path.exists():
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+        path = RESULTS_DIR / str(name_or_path)
+    info = json.loads((path / "run.json").read_text(encoding="utf-8"))
+    version = info["golden_version"]
+    if golden_hash(version) != info["golden_hash"]:
+        raise ValueError(
+            f"Golden set {version} changed after run {path.name} used it; golden sets must be immutable "
+            "(create a new version instead of editing)."
+        )
+    answers = {
+        record["id"]: record
+        for record in map(json.loads, (path / "answers.jsonl").read_text(encoding="utf-8").splitlines())
+    }
+    return Run(path=path, info=info, answers=answers, golden={g["id"]: g for g in load_golden(version)})
 
 
 def evidence_summary(answer: dict, max_chars: int = 220) -> str:
@@ -87,56 +142,59 @@ def evidence_summary(answer: dict, max_chars: int = 220) -> str:
     )
 
 
-def assignment_table(run: Run, golden: dict[str, dict] | None = None, review: dict | None = None) -> pd.DataFrame:
-    """The table required by the brief, with its column names."""
-    golden = golden or load_golden()
-    review = load_review() if review is None else review
+def assignment_table(run: Run, review: dict[str, dict] | None = None) -> pd.DataFrame:
+    """The table required by the brief, with its column names.
+
+    `review` holds manual verdicts {id: {"pass": bool, "note": str}}; questions without one fall
+    back to the automated rule check.
+    """
+    review = review or {}
     rows = []
-    for row in run.results.itertuples():
-        item, answer = golden[row.id], run.answers[row.id]
-        verdict = review.get(row.id, {})
-        passed = verdict.get("pass", bool(row.rule_pass))
-        notes = verdict.get("note") or (row.warnings if isinstance(row.warnings, str) else "")
+    for qid, answer in run.answers.items():
+        item, verdict = run.golden[qid], review.get(qid, {})
+        passed = verdict.get("pass", bool(answer["scores"]["rule_pass"]))
         rows.append(
             {
-                "Question": f"{row.id}. {item['question']}",
+                "Question": f"{qid}. {item['question']}",
                 "Expected Behavior": item["expected_behavior"],
                 "Retrieved Evidence": evidence_summary(answer),
                 "Answer": answer["answer"]
                 + (f"\n\nMissing: {answer['missing_information']}" if answer["missing_information"] else ""),
                 "Support Status": answer["support_status"],
                 "Pass/Fail": "Pass" if passed else "Fail",
-                "Notes": notes,
+                "Notes": verdict.get("note") or " | ".join(answer["warnings"]),
             }
         )
     return pd.DataFrame(rows, columns=TABLE_COLUMNS)
 
 
 def scores_table(run: Run) -> pd.DataFrame:
-    columns = ["id", "source", "type", "expected_status", "predicted_status", *RULE_SCORES, *RAGAS_SCORES]
-    return run.results[columns]
+    return run.results[["id", "source", "type", "expected_status", "predicted_status", *METRICS]]
 
 
 def compare_runs(runs: list[Run], metrics: list[str] | None = None) -> pd.DataFrame:
-    metrics = metrics or [*RULE_SCORES, *RAGAS_SCORES]
+    metrics = metrics or METRICS
     return pd.DataFrame(
         {
-            run.name: {m: run.summary["overall"].get(m) for m in metrics}
-            | {"top_k": run.config.get("top_k"), "n": run.summary["overall"]["n"]}
+            run.name: {m: run.summary()["overall"].get(m) for m in metrics}
+            | {
+                "top_k": run.config["top_k"],
+                "golden": run.config["golden_version"],
+                "prompt": run.config["prompt_hash"],
+                "n": len(run.answers),
+            }
             for run in runs
         }
     )
 
 
-def show_case(run: Run, qid: str, golden: dict[str, dict] | None = None, chars: int = 350) -> None:
+def show_case(run: Run, qid: str, chars: int = 350) -> None:
     """Print one question end to end: expectation, answer, scores, retrieved passages."""
-    golden = golden or load_golden()
-    item, answer = golden[qid], run.answers[qid]
-    row = run.results[run.results["id"] == qid].iloc[0]
+    item, answer = run.golden[qid], run.answers[qid]
     print(f"{qid} [{item['source']} / {item['type']}]\n\nQ: {item['question']}\n")
     print(f"Expected behaviour: {item['expected_behavior']}")
     print(f"Expected status: {item['expected_status']}   predicted: {answer['support_status']}")
-    print("Scores:", {m: row[m] for m in RULE_SCORES + RAGAS_SCORES})
+    print("Scores:", {m: answer["scores"].get(m) for m in METRICS})
     if answer["missing_information"]:
         print("Reported missing:", answer["missing_information"])
     print(f"\nAnswer:\n{answer['answer']}\n\nRetrieved ('*' = cited):")

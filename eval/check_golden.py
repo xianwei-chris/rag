@@ -1,6 +1,7 @@
 """Validate the golden set against the corpus and the current chunking.
 
-    uv run python -m eval.check_golden
+    uv run python -m eval.check_golden            # latest version in eval/golden/
+    uv run python -m eval.check_golden v1         # a specific version
 
 Checks that every evidence quote appears verbatim in its source document and
 lands inside a single chunk (a quote split across chunks can never be matched).
@@ -9,21 +10,20 @@ Also shows which chunk currently holds each quote, for debugging retrieval.
 
 from __future__ import annotations
 
-import json
 import sys
-from pathlib import Path
 
 from eval.evidence import normalize, quote_in
+from eval.versioning import latest_golden_version, load_golden
 from rag.chunking import load_chunks
 from rag.config import get_settings
 
-GOLDEN_PATH = Path(__file__).parent / "golden_set.json"
-
 
 def main() -> int:
+    version = sys.argv[1] if len(sys.argv) > 1 else latest_golden_version()
     settings = get_settings()
     chunks = load_chunks(settings.docs_dir, settings.max_chunk_words)
-    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+    golden = load_golden(version)
+    print(f"Checking golden set {version}\n")
     errors = 0
 
     for item in golden:
