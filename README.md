@@ -63,23 +63,20 @@ golden version was edited afterwards. Commit before a run so the recorded commit
 uv run python -m eval.check_golden                          # verify evidence quotes (latest version)
 uv run python -m eval.run_eval --name 03-my-change          # generate answers + score, latest golden set
 uv run python -m eval.run_eval --name tmp --ids S02,C04     # subset
-uv run python -m eval.run_eval --name tmp --skip-ragas      # rule-based checks only (no judge calls)
+uv run python -m eval.run_eval --name tmp --skip-judge      # deterministic metrics only (no judge calls)
 uv run python -m eval.run_eval --name <new-run> --golden v1 \
     --reuse-answers eval/results/<old-run>                # re-score old answers on a new golden set
 ```
 
-| Score | Kind | Meaning |
-|---|---|---|
-| `status_correct` | rule | predicted support status equals expected |
-| `evidence_recall` | rule | share of required evidence groups found in retrieved chunks |
-| `rule_pass` | rule | status correct, all required evidence retrieved, exact abstention where expected |
-| `faithfulness` | RAGAS | share of answer claims supported by retrieved contexts |
-| `context_precision` | RAGAS | whether useful chunks are ranked above non-useful ones (vs reference) |
-| `context_recall` | RAGAS | share of reference claims supported by retrieved contexts |
-| `factual_correctness` | RAGAS | claim-level F1 between answer and reference |
+Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in section 4.2 of
+`rag_assignment.ipynb`:
 
-RAGAS metrics are skipped for expected `not supported` questions (no claims to score); those are
-judged by exact abstention. The judge model defaults to `gemini/gemini-3.5-flash` (`RAG_JUDGE_MODEL`).
+- deterministic (quote matching, no LLM): `status_correct`, `retrieval_recall`, `retrieval_precision`;
+- judged (judge `RAG_JUDGE_MODEL`, default `gemini/gemini-2.5-flash`): `faithfulness` (RAGAS; claims
+  grounded in the retrieved passages), `reference_coverage` (share of reference claims the answer
+  states, supported questions), `missing_points_named` (partial questions);
+- `pass`: gates by expected status (supported / partially supported / not supported), with
+  `fail_reasons` stored per question.
 
 ### Notebook
 

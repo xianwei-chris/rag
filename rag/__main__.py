@@ -21,7 +21,9 @@ from rag.pipeline import RagPipeline, RagResult
 def print_result(result: RagResult, full: bool = False, snippet_chars: int = 300) -> None:
     print(f"\nAnswer:\n{textwrap.fill(result.answer, 100)}\n")
     print(f"Support status: {result.support_status}")
-    print(f"Citations: {', '.join(result.citations) or '-'}")
+    print("Citations:" + ("" if result.citations else " -"))
+    for line in result.cited_sources():
+        print(f"  {line}")
     if result.missing_information:
         print(f"Missing information: {result.missing_information}")
     for w in result.warnings:

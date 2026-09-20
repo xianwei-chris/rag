@@ -27,8 +27,3 @@ def group_hit(group: list[dict], retrieved: list) -> bool:
         for ev in group
         for chunk in retrieved
     )
-
-
-def evidence_recall(required: list[list[dict]], retrieved: list) -> tuple[int, int]:
-    """Return (groups satisfied, total groups)."""
-    return sum(group_hit(g, retrieved) for g in required), len(required)

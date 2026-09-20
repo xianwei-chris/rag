@@ -17,14 +17,13 @@ from pathlib import Path
 
 import pandas as pd
 
+from eval.scoring import DETERMINISTIC, JUDGED
 from eval.versioning import golden_hash, load_golden
 
 EVAL_DIR = Path(__file__).parent
 RESULTS_DIR = EVAL_DIR / "results"
 
-RULE_SCORES = ["status_correct", "evidence_recall", "rule_pass"]
-RAGAS_SCORES = ["faithfulness", "context_precision", "context_recall", "factual_correctness"]
-METRICS = RULE_SCORES + RAGAS_SCORES
+METRICS = ["pass", *DETERMINISTIC, *JUDGED]
 
 # Column names required by the assignment brief.
 TABLE_COLUMNS = [
@@ -88,6 +87,7 @@ class Run:
                     "expected_status": item["expected_status"],
                     "predicted_status": answer["support_status"],
                     **{m: answer["scores"].get(m) for m in METRICS},
+                    "fail_reasons": "; ".join(answer["scores"].get("fail_reasons") or []) or None,
                     "latency_s": answer["latency_s"],
                     "warnings": " | ".join(answer["warnings"]) or None,
                 }
@@ -146,13 +146,13 @@ def assignment_table(run: Run, review: dict[str, dict] | None = None) -> pd.Data
     """The table required by the brief, with its column names.
 
     `review` holds manual verdicts {id: {"pass": bool, "note": str}}; questions without one fall
-    back to the automated rule check.
+    back to the automated gates.
     """
     review = review or {}
     rows = []
     for qid, answer in run.answers.items():
         item, verdict = run.golden[qid], review.get(qid, {})
-        passed = verdict.get("pass", bool(answer["scores"]["rule_pass"]))
+        passed = verdict.get("pass", bool(answer["scores"]["pass"]))
         rows.append(
             {
                 "Question": f"{qid}. {item['question']}",
@@ -162,7 +162,9 @@ def assignment_table(run: Run, review: dict[str, dict] | None = None) -> pd.Data
                 + (f"\n\nMissing: {answer['missing_information']}" if answer["missing_information"] else ""),
                 "Support Status": answer["support_status"],
                 "Pass/Fail": "Pass" if passed else "Fail",
-                "Notes": verdict.get("note") or " | ".join(answer["warnings"]),
+                "Notes": verdict.get("note")
+                or "; ".join(answer["scores"].get("fail_reasons") or [])
+                or " | ".join(answer["warnings"]),
             }
         )
     return pd.DataFrame(rows, columns=TABLE_COLUMNS)
@@ -195,9 +197,15 @@ def show_case(run: Run, qid: str, chars: int = 350) -> None:
     print(f"Expected behaviour: {item['expected_behavior']}")
     print(f"Expected status: {item['expected_status']}   predicted: {answer['support_status']}")
     print("Scores:", {m: answer["scores"].get(m) for m in METRICS})
+    if answer["scores"].get("fail_reasons"):
+        print("Failed because:", "; ".join(answer["scores"]["fail_reasons"]))
     if answer["missing_information"]:
         print("Reported missing:", answer["missing_information"])
-    print(f"\nAnswer:\n{answer['answer']}\n\nRetrieved ('*' = cited):")
+    by_id = {c["chunk_id"]: c for c in answer["retrieved"]}
+    print(f"\nAnswer:\n{answer['answer']}\n\nCitations:")
+    for cid in answer["citations"]:
+        print(f"  [{cid}] {by_id[cid]['source']} :: {by_id[cid]['section']}")
+    print("\nRetrieved ('*' = cited):")
     for c in answer["retrieved"]:
         mark = "*" if c["chunk_id"] in answer["citations"] else " "
         print(f" {mark} [{c['chunk_id']}] {c['section']} (distance={c['distance']:.3f})")

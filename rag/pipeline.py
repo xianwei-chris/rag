@@ -24,6 +24,11 @@ class RagResult:
     def to_dict(self) -> dict:
         return asdict(self)
 
+    def cited_sources(self) -> list[str]:
+        """Each citation resolved to '[ID] file :: section', in citation order."""
+        by_id = {c.chunk_id: c for c in self.retrieved}
+        return [f"[{cid}] {by_id[cid].source} :: {by_id[cid].section}" for cid in self.citations]
+
 
 class RagPipeline:
     def __init__(self, settings: Settings | None = None):
