@@ -1,6 +1,6 @@
 {
   "golden_version": "v0",
-  "golden_hash": "a0c16b8fc787",
+  "golden_hash": "0519d7da3aca",
   "question_ids": [
     "S01",
     "S02",
@@ -23,7 +23,11 @@
     "C09",
     "C10"
   ],
-  "judge_model": "gemini/gemini-3.5-flash",
+  "judge_model": "gemini/gemini-2.5-flash",
+  "gates": {
+    "faithfulness_min": 0.8,
+    "reference_coverage_min": 0.8
+  },
   "generation": {
     "llm_model": "gemini/gemini-3.5-flash",
     "embed_model": "gemini/gemini-embedding-001",
@@ -31,7 +35,7 @@
     "max_chunk_words": 300,
     "prompt_hash": "03c2af6e3577",
     "git_commit": null,
-    "code_dirty": null
-  },
-  "backfilled": "Run predates provenance tracking and was generated from uncommitted code. The system prompt (hash above) is unchanged since the run. Golden v0's scoring fields (questions, expected_status, required_evidence, reference, missing_points) are unchanged since the run; expected_behavior was added afterwards and is display-only."
+    "code_dirty": null,
+    "answers_from": "01-baseline-k5"
+  }
 }
