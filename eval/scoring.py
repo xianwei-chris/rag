@@ -5,21 +5,22 @@ LLM-judged checks. `pass` is decided by gates that depend on the expected suppor
 mirroring the brief's pass conditions:
 
   supported            status correct · all required evidence retrieved ·
-                       answer faithful to the retrieved passages · reference claims covered
+                       factual correctness against the reference
   partially supported  status correct · all required evidence retrieved ·
-                       answer faithful to the retrieved passages · every missing point named
+                       every missing point named
   not supported        status correct · exact abstention string
 
-Ops assumption behind the gates: completeness first. Omitting a required fact fails; extra
-claims are tolerated only if the retrieved passages support them. So coverage is measured in
-one direction only - the share of the reference's claims that the answer states - and extra
-claims are policed by faithfulness instead.
+Faithfulness is computed but does not gate: it is a debug metric for grounding.
 
-RAGAS FactualCorrectness is deliberately not used: all three of its modes mix directions
-(`recall` divides answer claims entailed by the reference by that count plus missing reference
-claims), so a single stray verdict can zero a complete answer. `reference_coverage` below uses
-the same claim decomposition and NLI primitives in one direction, which is the quantity the
-completeness-first assumption cares about.
+Ops assumption behind the gates: completeness first. Omitting a required fact is the costly
+error in a compliance setting; extra claims are tolerated. So factual correctness runs in
+RAGAS "recall" mode, TP/(TP+FN), which penalises reference claims the answer omits but not
+extra claims the answer adds.
+
+Caveat to watch: RAGAS derives TP from one claim decomposition (response claims entailed by the
+reference) and FN from another (reference claims missing from the response), so an inconsistent
+judge can produce TP=0 with FN=0, which scores 0.0 for a complete answer (seen once on S03 with
+a weaker judge). Treat an exact 0.0 as suspect and check the claims before believing it.
 
 Faithfulness is measured against all retrieved passages, so it checks grounding rather than
 "supported by the cited passage". Citations themselves are validated in rag/generation.py,
@@ -36,11 +37,11 @@ from rag.config import ABSTAIN_ANSWER
 
 # Thresholds for the judged gates. Judge scores vary between runs, so these are starting
 # points to be calibrated against manual review, not exact requirements.
-FAITHFULNESS_MIN = 0.8
-REFERENCE_COVERAGE_MIN = 0.8
+FACTUAL_CORRECTNESS_MIN = 0.9  # references are short (2-6 claims), so this means "every reference claim"
+FACTUAL_CORRECTNESS_MODE = "recall"  # TP/(TP+FN): penalises omissions, not extra claims
 
 DETERMINISTIC = ["status_correct", "retrieval_recall", "retrieval_precision"]
-JUDGED = ["faithfulness", "reference_coverage", "missing_points_named"]
+JUDGED = ["faithfulness", "factual_correctness", "missing_points_named"]
 
 
 # ---------------------------------------------------------------- deterministic (no LLM)
@@ -90,8 +91,8 @@ def make_judge(model: str):
 def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[str, dict]:
     """faithfulness: share of answer claims supported by the retrieved passages
          (answers that make claims, i.e. expected supported/partial).
-    reference_coverage: share of the reference's claims that the answer states
-         (expected supported only).
+    factual_correctness: RAGAS claim-level score against the reference, `recall` mode
+         (expected supported only). Gate metric.
     missing_points_named: share of `missing_points` the answer or its missing_information
          states as unsupported (expected partial only)."""
     from ragas import EvaluationDataset, RunConfig, evaluate
@@ -123,17 +124,15 @@ def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[s
     ]
     run(Faithfulness(), "faithfulness", claim_rows)
 
-    checker = FactualCorrectness(llm=judge)  # used only for its claim decomposition and NLI
+    reference_rows = [
+        (item["id"], {"user_input": item["question"], "response": answers[item["id"]]["answer"],
+                      "reference": item["reference"]})
+        for item in golden
+        if item["expected_status"] == "supported"
+    ]
+    run(FactualCorrectness(mode=FACTUAL_CORRECTNESS_MODE), "factual_correctness", reference_rows)
 
-    async def coverage(item: dict) -> float:
-        """Share of the reference's claims entailed by the answer."""
-        claims = await checker.decompose_claims(item["reference"], callbacks=None)
-        if not claims:
-            return 0.0
-        verdicts = await checker.verify_claims(
-            premise=answers[item["id"]]["answer"], hypothesis_list=claims, callbacks=None
-        )
-        return round(float(sum(verdicts)) / len(claims), 3) if len(verdicts) else 0.0
+    checker = FactualCorrectness(llm=judge)  # used only for its NLI primitive
 
     async def points_named(item: dict) -> float:
         """Share of missing_points the answer states as unsupported."""
@@ -143,20 +142,14 @@ def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[s
         verdicts = await checker.verify_claims(premise=premise, hypothesis_list=hypotheses, callbacks=None)
         return round(float(sum(verdicts)) / len(hypotheses), 3) if len(verdicts) else 0.0
 
-    supported = [item for item in golden if item["expected_status"] == "supported"]
     partial = [item for item in golden if item["expected_status"] == "partially supported"]
+    if partial:
 
-    async def run_checks() -> tuple[list[float], list[float]]:
-        return (
-            await asyncio.gather(*(coverage(item) for item in supported)),
-            await asyncio.gather(*(points_named(item) for item in partial)),
-        )
+        async def run_partial() -> list[float]:
+            return await asyncio.gather(*(points_named(item) for item in partial))
 
-    coverages, named = asyncio.run(run_checks())
-    for item, value in zip(supported, coverages):
-        scores[item["id"]]["reference_coverage"] = value
-    for item, value in zip(partial, named):
-        scores[item["id"]]["missing_points_named"] = value
+        for item, value in zip(partial, asyncio.run(run_partial())):
+            scores[item["id"]]["missing_points_named"] = value
 
     return scores
 
@@ -180,13 +173,10 @@ def gate(item: dict, scores: dict) -> tuple[bool, list[str]]:
 
     if scores["retrieval_recall"] is not None and scores["retrieval_recall"] < 1.0:
         reasons.append("required evidence not retrieved")
-    faithfulness = scores["faithfulness"]
-    if faithfulness is None or faithfulness < FAITHFULNESS_MIN:
-        reasons.append("claims not grounded in retrieved passages")
     if item["expected_status"] == "supported":
-        covered = scores["reference_coverage"]
-        if covered is None or covered < REFERENCE_COVERAGE_MIN:
-            reasons.append("reference claims not covered")
+        fc = scores["factual_correctness"]
+        if fc is None or fc < FACTUAL_CORRECTNESS_MIN:
+            reasons.append("answer does not match the reference")
     else:
         named = scores["missing_points_named"]
         if named is None or named < 1.0:

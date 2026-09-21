@@ -64,6 +64,8 @@ uv run python -m eval.check_golden                          # verify evidence qu
 uv run python -m eval.run_eval --name 03-my-change          # generate answers + score, latest golden set
 uv run python -m eval.run_eval --name tmp --ids S02,C04     # subset
 uv run python -m eval.run_eval --name tmp --skip-judge      # deterministic metrics only (no judge calls)
+uv run python -m eval.run_eval --name 01-fc90 --regate \
+    --reuse-answers eval/results/01-baseline-k5             # re-apply gates to stored scores, no LLM calls
 uv run python -m eval.run_eval --name <new-run> --golden v1 \
     --reuse-answers eval/results/<old-run>                # re-score old answers on a new golden set
 ```
@@ -72,9 +74,9 @@ Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in se
 `rag_assignment.ipynb`:
 
 - deterministic (quote matching, no LLM): `status_correct`, `retrieval_recall`, `retrieval_precision`;
-- judged (judge `RAG_JUDGE_MODEL`, default `gemini/gemini-2.5-flash`): `faithfulness` (RAGAS; claims
-  grounded in the retrieved passages), `reference_coverage` (share of reference claims the answer
-  states, supported questions), `missing_points_named` (partial questions);
+- judged (judge `RAG_JUDGE_MODEL`, default `gemini/gemini-2.5-flash`): `factual_correctness` (RAGAS,
+  `recall` mode, supported questions — the gate), `missing_points_named` (partial questions), and
+  `faithfulness` (RAGAS; claims grounded in the retrieved passages — debug only, does not gate);
 - `pass`: gates by expected status (supported / partially supported / not supported), with
   `fail_reasons` stored per question.
 

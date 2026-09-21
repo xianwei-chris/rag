@@ -3,6 +3,8 @@
     uv run python -m eval.run_eval --name 02-my-change                # full run, latest golden set
     uv run python -m eval.run_eval --name tmp --ids S02,S08,C10       # subset
     uv run python -m eval.run_eval --name tmp --skip-judge            # deterministic metrics only
+    uv run python -m eval.run_eval --name 01-fc90 --regate \
+        --reuse-answers eval/results/01-baseline-k5                    # re-apply gates, no LLM calls
     uv run python -m eval.run_eval --name <new-run> --golden v1 \
         --reuse-answers eval/results/<old-run>                        # re-score old answers
 
@@ -56,6 +58,9 @@ def main() -> None:
     parser.add_argument("--golden", default=None, help="Golden set version (default: latest in eval/golden/).")
     parser.add_argument("--ids", help="Comma-separated question IDs to run, e.g. S01,C05.")
     parser.add_argument("--skip-judge", action="store_true", help="Deterministic metrics only; no pass/fail.")
+    parser.add_argument("--regate", action="store_true",
+                        help="Reuse the source run's judged scores and only re-apply the gates (no LLM calls). "
+                             "Use to compare gate thresholds; requires --reuse-answers.")
     parser.add_argument("--reuse-answers", type=Path, help="Existing run folder to re-score instead of regenerating.")
     args = parser.parse_args()
 
@@ -72,6 +77,9 @@ def main() -> None:
     if args.ids:
         wanted = set(args.ids.split(","))
         golden = [item for item in golden if item["id"] in wanted]
+
+    if args.regate and not args.reuse_answers:
+        raise SystemExit("--regate requires --reuse-answers.")
 
     settings = get_settings()
     source = args.reuse_answers
@@ -90,11 +98,15 @@ def main() -> None:
             "prompt_hash": sha256_short(SYSTEM_PROMPT),
             **git_state(),
         }
+    stored = {a["id"]: (a.get("scores") or {}) for a in answers} if args.regate else {}
     answers = {a["id"]: {k: v for k, v in a.items() if k != "scores"} for a in answers}
     golden = [item for item in golden if item["id"] in answers]
 
     judged = {}
-    if not args.skip_judge:
+    if args.regate:
+        judged = {qid: {m: sc.get(m) for m in scoring.JUDGED} for qid, sc in stored.items()}
+        print("Re-applying gates to the stored judged scores (no LLM calls).")
+    elif not args.skip_judge:
         print(f"Scoring with judge {JUDGE_MODEL}...")
         judged = scoring.judged_scores(golden, answers, scoring.make_judge(JUDGE_MODEL))
 
@@ -102,7 +114,7 @@ def main() -> None:
     for item in golden:
         record = answers[item["id"]]
         scores = scoring.deterministic_scores(item, record) | judged.get(item["id"], dict.fromkeys(scoring.JUDGED))
-        if args.skip_judge:
+        if args.skip_judge and not args.regate:
             scores |= {"pass": None, "fail_reasons": ["not judged"]}
         else:
             passed, reasons = scoring.gate(item, scores)
@@ -113,10 +125,12 @@ def main() -> None:
         "golden_version": golden_version,
         "golden_hash": golden_hash(golden_version),
         "question_ids": [item["id"] for item in golden],
-        "judge_model": None if args.skip_judge else JUDGE_MODEL,
+        "judge_model": json.loads((source / "run.json").read_text(encoding="utf-8"))["judge_model"]
+        if args.regate
+        else (None if args.skip_judge else JUDGE_MODEL),
         "gates": {
-            "faithfulness_min": scoring.FAITHFULNESS_MIN,
-            "reference_coverage_min": scoring.REFERENCE_COVERAGE_MIN,
+            "factual_correctness_min": scoring.FACTUAL_CORRECTNESS_MIN,
+            "factual_correctness_mode": scoring.FACTUAL_CORRECTNESS_MODE,
         },
         "generation": generation,
     }

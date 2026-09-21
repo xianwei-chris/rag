@@ -25,8 +25,8 @@
   ],
   "judge_model": "gemini/gemini-2.5-flash",
   "gates": {
-    "faithfulness_min": 0.8,
-    "reference_coverage_min": 0.8
+    "factual_correctness_min": 0.9,
+    "factual_correctness_mode": "recall"
   },
   "generation": {
     "llm_model": "gemini/gemini-3.5-flash",
