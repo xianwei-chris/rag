@@ -232,6 +232,15 @@ def review_style(frame: pd.DataFrame):
     ).set_table_styles([{"selector": "th", "props": [("text-align", "left"), ("vertical-align", "top")]}])
 
 
+def review_one(run: Run, qid: str, review: dict[str, dict] | None = None, chars: int = 400):
+    """One question as a tall, styled single-column table: fields down the side, values beside them.
+
+    The same content as a `review_table` row, transposed, because 25 wide columns are unreadable for
+    a single case.
+    """
+    return review_style(review_table(run, review, chars=chars).loc[[qid]].T)
+
+
 def review_case(run: Run, qid: str, chars: int = 400) -> None:
     """One question printed as a block, for reading rather than scanning a wide table."""
     row = review_table(run, chars=chars).loc[qid]
