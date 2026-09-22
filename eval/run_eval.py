@@ -105,7 +105,20 @@ def main() -> None:
     judged = {}
     if args.regate:
         judged = {qid: {m: sc.get(m) for m in scoring.JUDGED} for qid, sc in stored.items()}
-        print("Re-applying gates to the stored judged scores (no LLM calls).")
+        # A gate change can need a metric the source run never scored (e.g. factual correctness on
+        # partial questions). Judge only those, so re-gating stays as cheap as it can be.
+        needed = [
+            item
+            for item in golden
+            if item["expected_status"] != "not supported"
+            and judged.get(item["id"], {}).get("factual_correctness") is None
+        ]
+        if needed:
+            print(f"Judging {len(needed)} question(s) missing a gate metric: {[i['id'] for i in needed]}")
+            fresh = scoring.judged_scores(needed, answers, scoring.make_judge(JUDGE_MODEL))
+            for qid, values in fresh.items():
+                judged[qid] = {k: (judged.get(qid, {}).get(k) if v is None else v) for k, v in values.items()}
+        print("Re-applying gates to the stored judged scores.")
     elif not args.skip_judge:
         print(f"Scoring with judge {JUDGE_MODEL}...")
         judged = scoring.judged_scores(golden, answers, scoring.make_judge(JUDGE_MODEL))

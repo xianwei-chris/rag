@@ -1,16 +1,17 @@
 """Evaluation design: metrics and pass/fail gates.
 
 Each question gets deterministic metrics (quote matching, no LLM) and, where they apply,
-LLM-judged checks. `pass` is decided by gates that depend on the expected support status,
-mirroring the brief's pass conditions:
+LLM-judged checks. One gate shape applies to every question -- the right call, and the right
+content -- and only the content check is instantiated per expected support status:
 
-  supported            status correct · all required evidence retrieved ·
-                       factual correctness against the reference
-  partially supported  status correct · all required evidence retrieved ·
-                       every missing point named
-  not supported        status correct · exact abstention string
+  supported            status correct · factual correctness against the reference
+  partially supported  status correct · factual correctness against the reference (which covers
+                       only the supported portion) · every missing point named
+  not supported        status correct (the abstention text is emitted by code, not the model)
 
-Faithfulness is computed but does not gate: it is a debug metric for grounding.
+Retrieval recall and precision, and faithfulness, are computed but do not gate: they are
+diagnostics. Recall in particular explains *why* a wrong answer was wrong, but gating on it
+would double-count, since an answer that needed a missing passage already fails on content.
 
 Ops assumption behind the gates: completeness first. Omitting a required fact is the costly
 error in a compliance setting; extra claims are tolerated. So factual correctness runs in
@@ -92,7 +93,7 @@ def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[s
     """faithfulness: share of answer claims supported by the retrieved passages
          (answers that make claims, i.e. expected supported/partial).
     factual_correctness: RAGAS claim-level score against the reference, `recall` mode
-         (expected supported only). Gate metric.
+         (expected supported and partial). Gate metric.
     missing_points_named: share of `missing_points` the answer or its missing_information
          states as unsupported (expected partial only)."""
     from ragas import EvaluationDataset, RunConfig, evaluate
@@ -102,19 +103,37 @@ def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[s
     run_config = RunConfig(max_workers=4, timeout=300)
 
     def run(metric, name: str, rows: list[tuple[str, dict]]) -> None:
+        """Score `rows`, then retry once for any that came back empty.
+
+        RAGAS already retries each call (RunConfig.max_retries), and `raise_exceptions=False` turns
+        whatever survives that into a silent NaN. A fresh `evaluate` recovers cases where the whole
+        batch was affected (a rate limit clearing, say), and anything still missing is reported
+        rather than left to look like a low score.
+        """
         if not rows:
             return
-        frame = evaluate(
-            EvaluationDataset.from_list([row for _, row in rows]),
-            metrics=[metric],
-            llm=judge,
-            run_config=run_config,
-            raise_exceptions=False,
-            show_progress=False,
-        ).to_pandas()
-        column = frame.columns[-1]
-        for i, (qid, _) in enumerate(rows):
-            scores[qid][name] = _clean(frame.iloc[i][column])
+
+        def score(batch: list[tuple[str, dict]]) -> None:
+            frame = evaluate(
+                EvaluationDataset.from_list([row for _, row in batch]),
+                metrics=[metric],
+                llm=judge,
+                run_config=run_config,
+                raise_exceptions=False,
+                show_progress=False,
+            ).to_pandas()
+            column = frame.columns[-1]
+            for i, (qid, _) in enumerate(batch):
+                scores[qid][name] = _clean(frame.iloc[i][column])
+
+        score(rows)
+        retry = [row for row in rows if scores[row[0]][name] is None]
+        if retry:
+            print(f"  {name}: no score for {[qid for qid, _ in retry]}; retrying once.")
+            score(retry)
+        still_missing = [qid for qid, _ in rows if scores[qid][name] is None]
+        if still_missing:
+            print(f"  WARNING: {name} could not be scored for {still_missing} (judge error, not a low score).")
 
     claim_rows = [
         (item["id"], {"user_input": item["question"], "response": answers[item["id"]]["answer"],
@@ -124,11 +143,14 @@ def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[s
     ]
     run(Faithfulness(), "faithfulness", claim_rows)
 
+    # Partial questions are scored too: their reference covers only the supported portion, so recall
+    # against it asks "did the answer state everything the documents do say?" without penalising the
+    # answer for leaving out what the documents never covered.
     reference_rows = [
         (item["id"], {"user_input": item["question"], "response": answers[item["id"]]["answer"],
                       "reference": item["reference"]})
         for item in golden
-        if item["expected_status"] == "supported"
+        if item["expected_status"] in ("supported", "partially supported")
     ]
     run(FactualCorrectness(mode=FACTUAL_CORRECTNESS_MODE), "factual_correctness", reference_rows)
 
@@ -167,17 +189,19 @@ def gate(item: dict, scores: dict) -> tuple[bool, list[str]]:
     if not scores["status_correct"]:
         reasons.append("wrong support status")
     if item["expected_status"] == "not supported":
-        if not scores["abstained_exactly"]:
-            reasons.append("not the exact abstention string")
+        # Nothing further to check: rag/generation.py emits ABSTAIN_ANSWER for this status, so the
+        # text is guaranteed by code rather than by the model. `abstained_exactly` is recorded as a
+        # regression check on that guarantee, but it cannot fail independently of the status.
         return not reasons, reasons
 
-    if scores["retrieval_recall"] is not None and scores["retrieval_recall"] < 1.0:
-        reasons.append("required evidence not retrieved")
-    if item["expected_status"] == "supported":
-        fc = scores["factual_correctness"]
-        if fc is None or fc < FACTUAL_CORRECTNESS_MIN:
-            reasons.append("answer does not match the reference")
-    else:
+    fc = scores["factual_correctness"]
+    if fc is None:
+        # Distinguish a judge failure from a low score: a missing metric is an evaluation problem,
+        # not evidence about the answer, and should not be read as a content failure.
+        reasons.append("factual correctness not scored (judge error)")
+    elif fc < FACTUAL_CORRECTNESS_MIN:
+        reasons.append("answer does not match the reference")
+    if item["expected_status"] == "partially supported":
         named = scores["missing_points_named"]
         if named is None or named < 1.0:
             reasons.append("missing points not all named")

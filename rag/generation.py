@@ -25,8 +25,9 @@ to use outside knowledge.
    - "supported": the passages fully answer the question.
    - "partially supported": the passages answer part of it. Answer only that part, and list exactly \
 what is not covered in missing_information. Do not guess the missing details.
-   - "not supported": the passages do not answer the question. The answer must be exactly \
-"{ABSTAIN_ANSWER}" and citations must be empty.
+   - "not supported": the passages do not answer the question. Set answer to "" and citations to \
+[]; the system fills in the standard message. Do not write a refusal of your own, and do not add \
+anything you know from outside the passages.
 
 Return only a JSON object:
 {{"answer": string, "support_status": "supported" | "partially supported" | "not supported", \

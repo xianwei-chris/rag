@@ -73,11 +73,13 @@ uv run python -m eval.run_eval --name <new-run> --golden v1 \
 Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in section 4.2 of
 `rag_assignment.ipynb`:
 
-- deterministic (quote matching, no LLM): `status_correct`, `retrieval_recall`, `retrieval_precision`;
+- deterministic (quote matching, no LLM): `status_correct` (gates), `retrieval_recall` and
+  `retrieval_precision` (diagnostics; they explain *why* an answer was wrong but do not gate);
 - judged (judge `RAG_JUDGE_MODEL`, default `gemini/gemini-2.5-flash`): `factual_correctness` (RAGAS,
-  `recall` mode, supported questions — the gate), `missing_points_named` (partial questions), and
-  `faithfulness` (RAGAS; claims grounded in the retrieved passages — debug only, does not gate);
-- `pass`: gates by expected status (supported / partially supported / not supported), with
+  `recall` mode, supported questions — gates), `missing_points_named` (partial questions — gates),
+  and `faithfulness` (RAGAS; claims grounded in the retrieved passages — debug only, does not gate);
+- `pass`: one gate shape for every question — the right call (`status_correct`) and the right content
+  (per expected status: factual correctness / missing points named / exact abstention string) — with
   `fail_reasons` stored per question.
 
 ### Notebook

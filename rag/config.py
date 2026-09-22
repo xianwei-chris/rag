@@ -9,7 +9,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ABSTAIN_ANSWER = "Not enough information in the provided documents."
+# The one fixed abstention message. It is a constant, not something the model writes: a model-worded
+# refusal can smuggle in an invented fact ("...though notification is generally required within 72
+# hours"), and code that emits a fixed string cannot. Kept exact so the evaluation, and any caller,
+# can detect abstention without an LLM. The second sentence points at what the pack does cover.
+ABSTAIN_ANSWER = (
+    "Sorry, we could not find an answer to that in the provided documents. "
+    "We can help with PDPA key concepts, healthcare-sector guidance, anonymisation, "
+    "and the internal data-sharing policy - try asking about one of those."
+)
 
 load_dotenv(PROJECT_ROOT / ".env")
 

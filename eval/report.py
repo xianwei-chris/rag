@@ -170,6 +170,80 @@ def assignment_table(run: Run, review: dict[str, dict] | None = None) -> pd.Data
     return pd.DataFrame(rows, columns=TABLE_COLUMNS)
 
 
+def passages(answer: dict, chars: int = 400, cited_only: bool = False) -> str:
+    """Every retrieved passage as '* [id] file :: section — text' ('*' marks a cited one)."""
+    chunks = answer["retrieved"]
+    if cited_only:
+        chunks = [c for c in chunks if c["chunk_id"] in answer["citations"]]
+    return "\n\n".join(
+        f"{'*' if c['chunk_id'] in answer['citations'] else ' '} [{c['chunk_id']}] "
+        f"{c['source']} :: {c['section']} (d={c['distance']:.3f})\n"
+        f"{' '.join(c['text'].split())[:chars]}{'...' if len(c['text']) > chars else ''}"
+        for c in chunks
+    )
+
+
+def review_table(run: Run, review: dict[str, dict] | None = None, chars: int = 400) -> pd.DataFrame:
+    """Everything about each question in one row, for reading the run and recording a verdict.
+
+    Columns cover what was asked, what was expected, what the system did, and how it scored, so a
+    case can be judged without opening any other file. `my_pass`/`my_note` carry the verdicts already
+    in `review` and are empty elsewhere, ready to be filled in.
+    """
+    review = review or {}
+    rows = []
+    for qid, answer in run.answers.items():
+        item, verdict, scores = run.golden[qid], review.get(qid, {}), answer["scores"]
+        by_id = {c["chunk_id"]: c for c in answer["retrieved"]}
+        rows.append(
+            {
+                "id": qid,
+                "source": item["source"],
+                "type": item["type"],
+                "question": item["question"],
+                "expected_behavior": item["expected_behavior"],
+                "expected_status": item["expected_status"],
+                "predicted_status": answer["support_status"],
+                "reference": item.get("reference"),
+                "missing_points": "; ".join(item.get("missing_points") or []) or None,
+                "answer": answer["answer"],
+                "missing_information": answer["missing_information"],
+                "citations": "\n".join(
+                    f"[{c}] {by_id[c]['source']} :: {by_id[c]['section']}" for c in answer["citations"]
+                )
+                or None,
+                "retrieved": passages(answer, chars=chars),
+                **{m: scores.get(m) for m in METRICS},
+                "fail_reasons": "; ".join(scores.get("fail_reasons") or []) or None,
+                "warnings": " | ".join(answer["warnings"]) or None,
+                "latency_s": answer["latency_s"],
+                "notes": item.get("notes"),
+                "my_pass": verdict.get("pass"),
+                "my_note": verdict.get("note"),
+            }
+        )
+    return pd.DataFrame(rows).set_index("id")
+
+
+def review_style(frame: pd.DataFrame):
+    """`review_table` rendered so long text wraps and rows stay aligned."""
+    return frame.style.set_properties(
+        **{"white-space": "pre-wrap", "text-align": "left", "vertical-align": "top"}
+    ).set_table_styles([{"selector": "th", "props": [("text-align", "left"), ("vertical-align", "top")]}])
+
+
+def review_case(run: Run, qid: str, chars: int = 400) -> None:
+    """One question printed as a block, for reading rather than scanning a wide table."""
+    row = review_table(run, chars=chars).loc[qid]
+    for field, value in row.items():
+        if value is None or value == "" or (isinstance(value, float) and math.isnan(value)):
+            continue
+        text = str(value)
+        print(f"{field}:")
+        print("\n".join("    " + line for line in text.splitlines()) if "\n" in text else f"    {text}")
+    print()
+
+
 def scores_table(run: Run) -> pd.DataFrame:
     return run.results[["id", "source", "type", "expected_status", "predicted_status", *METRICS]]
 
