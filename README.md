@@ -65,7 +65,7 @@ uv run python -m eval.run_eval --name 03-my-change          # generate answers +
 uv run python -m eval.run_eval --name tmp --ids S02,C04     # subset
 uv run python -m eval.run_eval --name tmp --skip-judge      # deterministic metrics only (no judge calls)
 uv run python -m eval.run_eval --name 01-fc90 --regate \
-    --reuse-answers eval/results/01-baseline-k5             # re-apply gates to stored scores, no LLM calls
+    --reuse-answers eval/results/01-baseline             # re-apply gates to stored scores, no LLM calls
 uv run python -m eval.run_eval --name <new-run> --golden v1 \
     --reuse-answers eval/results/<old-run>                # re-score old answers on a new golden set
 RAG_QUERY_EXPANSION=1 uv run python -m eval.run_eval --name <new-run>   # with sub-query retrieval
