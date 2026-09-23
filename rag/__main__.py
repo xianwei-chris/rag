@@ -14,7 +14,7 @@ import sys
 import textwrap
 
 from rag.chunking import load_chunks
-from rag.config import get_settings
+from rag.config import GREETING, get_settings
 from rag.pipeline import RagPipeline, RagResult
 
 
@@ -43,7 +43,9 @@ def print_result(result: RagResult, full: bool = False, snippet_chars: int = 300
 
 
 def chat_loop(pipeline: RagPipeline, model: str, k: int | None, full: bool) -> int:
-    print(f"RAG chat ({model}). Type a question; 'exit', empty line or Ctrl-C to quit.")
+    print(f"RAG chat ({model})\n")
+    print(textwrap.fill(GREETING, 96).replace("\n ", "\n"))
+    print("\nType 'exit', an empty line or Ctrl-C to quit.")
     while True:
         try:
             question = input("\nQ> ").strip()

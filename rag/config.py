@@ -18,6 +18,14 @@ ABSTAIN_ANSWER = (
     "We can help with PDPA key concepts, healthcare-sector guidance, anonymisation, "
     "and the internal data-sharing policy - try asking about one of those."
 )
+# The chat loop's opening line. Same voice as ABSTAIN_ANSWER, and it names the same four topics, so a
+# user learns the scope before asking rather than by being refused.
+GREETING = (
+    "Ask me anything about PDPA key concepts, healthcare-sector guidance, anonymisation, or the "
+    "internal data-sharing policy.\n"
+    "I answer only from those documents, and I cite the passages I used and say whether they fully "
+    "support the answer. If they do not, I will say so rather than guess."
+)
 
 load_dotenv(PROJECT_ROOT / ".env")
 
