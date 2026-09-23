@@ -35,7 +35,8 @@
     "max_chunk_words": 300,
     "query_expansion": true,
     "prompt_hash": "548a354c9c75",
-    "git_commit": "b1c7c94",
-    "code_dirty": true
+    "git_commit": "c71fa38",
+    "code_dirty": true,
+    "answers_from": null
   }
 }

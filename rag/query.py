@@ -6,15 +6,24 @@ what determines that*") ranked the passage holding the notifiability criteria 8t
 that passage ranks 1st. Rewriting into a single better query does not help, because it only moves
 the same point.
 
-Two design rules, both learned from failures:
+Design, kept deliberately simple: split the question into at most `MAX_SUBQUERIES` sub-queries,
+retrieve `PER_QUERY` chunks for each, and pass the union to generation. No rank fusion and no
+weighting -- each sub-query simply brings its own best passages.
 
-* **Always retrieve for the original question as well**, and never let the sub-queries displace its
-  best hits. Naive rank fusion over sub-queries alone dropped both chunks holding S02's required
-  evidence, because the generated sub-queries were uniformly anonymisation-flavoured and out-voted
-  the question. `RESERVED` top hits of the original are kept unconditionally, so expansion can only
-  add.
+Two rules:
+
+* **The original question is always one of the queries, retrieved to full depth `top_k`.** Sub-queries
+  can miss what the question as a whole is about: an early attempt using only the generated
+  sub-queries dropped both chunks holding S02's required evidence, because all three came back
+  anonymisation-flavoured while the question was really about a suppression rule. Retrieving the
+  original to `top_k` also guarantees at least `top_k` passages: when sub-queries overlap heavily the
+  de-duplicated union can otherwise be *smaller* than an ordinary retrieval, which starved C05.
 * **Skip the call when the question is simple.** A single-clause question has nothing to decompose,
   and the extra call buys nothing.
+
+The cost is a larger context on multi-part questions (up to `(1 + MAX_SUBQUERIES) * PER_QUERY`
+passages before de-duplication, against `top_k` for a simple one), traded for covering each part of
+the question.
 """
 
 from __future__ import annotations
@@ -24,9 +33,8 @@ import re
 
 from rag import llm
 
-RESERVED = 3  # top hits of the original query that sub-queries may never displace
 MAX_SUBQUERIES = 3
-RRF_K = 60  # reciprocal-rank fusion constant; damps the tail of each ranking
+PER_QUERY = 3  # chunks retrieved per query, including the original
 
 EXPAND_PROMPT = """Rewrite the user's question as search queries for a document retrieval system.
 Return JSON: {"queries": [string, ...]}.
@@ -67,27 +75,16 @@ def sub_queries(question: str, model: str, temperature: float) -> list[str]:
     return out[:MAX_SUBQUERIES]
 
 
-def fuse(original: list, extra: list[list], k: int) -> list:
-    """Keep the original ranking's top `RESERVED` hits, then fill from rank-fused sub-query results.
+def merge(rankings: list[list]) -> list:
+    """De-duplicated union of several rankings, taking one chunk at a time from each in turn.
 
-    `original` and each list in `extra` are rankings of retrieved chunks, best first. Returns at most
-    `k` chunks. Because the reserved hits are taken first and the rest only fills the remainder, the
-    result can never be worse than `original[:k]` on evidence the original already found.
+    Interleaving rather than concatenating means every query contributes its best hit before any
+    query contributes its second, so no single sub-query can crowd out the others.
     """
-    kept = list(original[:RESERVED])
-    chosen = {c.chunk_id for c in kept}
-    if len(kept) >= k:
-        return kept[:k]
-
-    scores: dict[str, float] = {}
-    pool: dict[str, object] = {}
-    for ranking in [original, *extra]:
-        for rank, chunk in enumerate(ranking, 1):
-            if chunk.chunk_id in chosen:
-                continue
-            scores[chunk.chunk_id] = scores.get(chunk.chunk_id, 0.0) + 1 / (RRF_K + rank)
-            pool.setdefault(chunk.chunk_id, chunk)
-
-    for cid in sorted(scores, key=scores.get, reverse=True)[: k - len(kept)]:
-        kept.append(pool[cid])
-    return kept
+    merged, seen = [], set()
+    for rank in range(max((len(r) for r in rankings), default=0)):
+        for ranking in rankings:
+            if rank < len(ranking) and ranking[rank].chunk_id not in seen:
+                seen.add(ranking[rank].chunk_id)
+                merged.append(ranking[rank])
+    return merged

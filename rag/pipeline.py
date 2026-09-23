@@ -46,16 +46,18 @@ class RagPipeline:
         return build_index(self.settings, self._embed)
 
     def _retrieve(self, question: str, k: int) -> tuple[list[RetrievedChunk], list[str]]:
-        """Retrieve `k` chunks, optionally widening the question into sub-queries first."""
-        chunks = retrieve(question, self.settings, self._embed, k)
+        """Retrieve `k` chunks, or, for a multi-part question, the union over its sub-queries."""
         if not self.settings.query_expansion:
-            return chunks, []
+            return retrieve(question, self.settings, self._embed, k), []
         subs = query.sub_queries(question, self.settings.llm_model, self.settings.temperature)
         if not subs:
-            return chunks, []
-        # Retrieve deeper per sub-query so fusion has a ranking to work with, not just k hits.
-        extra = [retrieve(q, self.settings, self._embed, k * 3) for q in subs]
-        return query.fuse(chunks, extra, k), subs
+            return retrieve(question, self.settings, self._embed, k), []
+        # The original is retrieved to full depth `k`, the sub-queries to PER_QUERY each. Retrieving
+        # only PER_QUERY for the original too can leave fewer than `k` passages after de-duplication
+        # when the sub-queries overlap, which starved C05 of the passage naming the notification duty.
+        rankings = [retrieve(question, self.settings, self._embed, k)]
+        rankings += [retrieve(q, self.settings, self._embed, query.PER_QUERY) for q in subs]
+        return query.merge(rankings), subs
 
     def ask(self, question: str, k: int | None = None) -> RagResult:
         warnings = index_warnings(self.settings)
