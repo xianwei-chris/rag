@@ -3,8 +3,8 @@
 A run folder stores only what cannot be recomputed:
     answers.jsonl  per question: the system's output and its scores
     run.json       provenance: golden version + hash, git commit, models, top_k, prompt hash
-Everything else (results table, averages, the assignment's table) is derived here, so stored
-numbers can never disagree with each other. A run is always displayed against the golden-set
+Everything else (results tables and averages) is derived here, so stored numbers can never
+disagree with each other. A run is always displayed against the golden-set
 version it was scored with, so later iterations never change what an earlier run shows.
 """
 
@@ -24,18 +24,6 @@ EVAL_DIR = Path(__file__).parent
 RESULTS_DIR = EVAL_DIR / "results"
 
 METRICS = ["pass", *DETERMINISTIC, *JUDGED]
-
-# Column names required by the assignment brief.
-TABLE_COLUMNS = [
-    "Question",
-    "Expected Behavior",
-    "Retrieved Evidence",
-    "Answer",
-    "Support Status",
-    "Pass/Fail",
-    "Notes",
-]
-
 
 def _mean(values) -> float | None:
     numbers = [float(v) for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
@@ -110,10 +98,6 @@ class Run:
         }
 
 
-def list_runs(results_dir: Path = RESULTS_DIR) -> list[Path]:
-    return sorted(p for p in results_dir.iterdir() if (p / "run.json").exists())
-
-
 def load_run(name_or_path: Path | str) -> Run:
     path = Path(name_or_path)
     if not path.exists():
@@ -130,45 +114,6 @@ def load_run(name_or_path: Path | str) -> Run:
         for record in map(json.loads, (path / "answers.jsonl").read_text(encoding="utf-8").splitlines())
     }
     return Run(path=path, info=info, answers=answers, golden={g["id"]: g for g in load_golden(version)})
-
-
-def evidence_summary(answer: dict, max_chars: int = 220) -> str:
-    """Compact 'chunk_id (section): snippet' list of the cited (else retrieved) passages."""
-    cited = [c for c in answer["retrieved"] if c["chunk_id"] in answer["citations"]]
-    shown = cited or answer["retrieved"][:2]
-    return "\n".join(
-        f"[{c['chunk_id']}] {c['source']} :: {c['section']} — "
-        f"{' '.join(c['text'].split())[:max_chars]}..."
-        for c in shown
-    )
-
-
-def assignment_table(run: Run, review: dict[str, dict] | None = None) -> pd.DataFrame:
-    """The table required by the brief, with its column names.
-
-    `review` holds manual verdicts {id: {"pass": bool, "note": str}}; questions without one fall
-    back to the automated gates.
-    """
-    review = review or {}
-    rows = []
-    for qid, answer in run.answers.items():
-        item, verdict = run.golden[qid], review.get(qid, {})
-        passed = verdict.get("pass", bool(answer["scores"]["pass"]))
-        rows.append(
-            {
-                "Question": f"{qid}. {item['question']}",
-                "Expected Behavior": item["expected_behavior"],
-                "Retrieved Evidence": evidence_summary(answer),
-                "Answer": answer["answer"]
-                + (f"\n\nMissing: {answer['missing_information']}" if answer["missing_information"] else ""),
-                "Support Status": answer["support_status"],
-                "Pass/Fail": "Pass" if passed else "Fail",
-                "Notes": verdict.get("note")
-                or "; ".join(answer["scores"].get("fail_reasons") or [])
-                or " | ".join(answer["warnings"]),
-            }
-        )
-    return pd.DataFrame(rows, columns=TABLE_COLUMNS)
 
 
 def passages(answer: dict, chars: int = 400, cited_only: bool = False) -> str:
@@ -194,29 +139,6 @@ def required_evidence(item: dict) -> str:
     for n, group in enumerate(item["required_evidence"], 1):
         lines.append(f"group {n}:" + (" (any one of)" if len(group) > 1 else ""))
         lines += [f'    {ev["source"]}: "{ev["quote"]}"' for ev in group]
-    return "\n".join(lines)
-
-
-def evidence_check(item: dict, answer: dict) -> str:
-    """`required_evidence` with each group marked HIT/MISS for THIS RUN, and the chunk that matched.
-
-    Not a table column: this is what `retrieval_recall` counts, shown per group. Call it directly
-    when a recall score needs explaining, e.g. evidence_check(run.golden["C04"], run.answers["C04"]).
-    """
-    from eval.evidence import quote_in
-
-    lines = []
-    for n, group in enumerate(item["required_evidence"], 1):
-        found = {
-            id(ev): next(
-                (c["chunk_id"] for c in answer["retrieved"]
-                 if c["source"] == ev["source"] and quote_in(ev["quote"], c["text"])),
-                None,
-            )
-            for ev in group
-        }
-        lines.append(f"group {n}: {'HIT' if any(found.values()) else 'MISS'}")
-        lines += [f'    [{found[id(ev)] or "--"}] {ev["source"]}: "{ev["quote"][:160]}"' for ev in group]
     return "\n".join(lines)
 
 
@@ -279,57 +201,7 @@ def review_one(run: Run, qid: str, review: dict[str, dict] | None = None, chars:
     return review_style(review_table(run, review, chars=chars).loc[[qid]].T)
 
 
-def review_case(run: Run, qid: str, chars: int = 400) -> None:
-    """One question printed as a block, for reading rather than scanning a wide table."""
-    row = review_table(run, chars=chars).loc[qid]
-    for field, value in row.items():
-        if value is None or value == "" or (isinstance(value, float) and math.isnan(value)):
-            continue
-        text = str(value)
-        print(f"{field}:")
-        print("\n".join("    " + line for line in text.splitlines()) if "\n" in text else f"    {text}")
-    print()
-
-
 def scores_table(run: Run) -> pd.DataFrame:
     return run.results[["id", "source", "type", "expected_status", "predicted_status", *METRICS]]
 
 
-def compare_runs(runs: list[Run], metrics: list[str] | None = None) -> pd.DataFrame:
-    metrics = metrics or METRICS
-    return pd.DataFrame(
-        {
-            run.name: {m: run.summary()["overall"].get(m) for m in metrics}
-            | {
-                "top_k": run.config["top_k"],
-                "expansion": run.config["query_expansion"],
-                "golden": run.config["golden_version"],
-                "prompt": run.config["prompt_hash"][:6],
-                "answers": run.config["answers_from"] or "fresh",
-                "n": len(run.answers),
-            }
-            for run in runs
-        }
-    )
-
-
-def show_case(run: Run, qid: str, chars: int = 350) -> None:
-    """Print one question end to end: expectation, answer, scores, retrieved passages."""
-    item, answer = run.golden[qid], run.answers[qid]
-    print(f"{qid} [{item['source']} / {item['type']}]\n\nQ: {item['question']}\n")
-    print(f"Expected behaviour: {item['expected_behavior']}")
-    print(f"Expected status: {item['expected_status']}   predicted: {answer['support_status']}")
-    print("Scores:", {m: answer["scores"].get(m) for m in METRICS})
-    if answer["scores"].get("fail_reasons"):
-        print("Failed because:", "; ".join(answer["scores"]["fail_reasons"]))
-    if answer["missing_information"]:
-        print("Reported missing:", answer["missing_information"])
-    by_id = {c["chunk_id"]: c for c in answer["retrieved"]}
-    print(f"\nAnswer:\n{answer['answer']}\n\nCitations:")
-    for cid in answer["citations"]:
-        print(f"  [{cid}] {by_id[cid]['source']} :: {by_id[cid]['section']}")
-    print("\nRetrieved ('*' = cited):")
-    for c in answer["retrieved"]:
-        mark = "*" if c["chunk_id"] in answer["citations"] else " "
-        print(f" {mark} [{c['chunk_id']}] {c['section']} (distance={c['distance']:.3f})")
-        print("     ", " ".join(c["text"].split())[:chars], "...")
