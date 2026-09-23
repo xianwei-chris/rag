@@ -223,8 +223,8 @@ __marimo__/
 .chroma/
 
 
-# Documents
-documents/
+# macOS metadata
+.DS_Store
 
 # Draft
 draft/

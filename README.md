@@ -30,6 +30,16 @@ uv run python -m rag index   # or `source .venv/bin/activate` and drop the `uv r
 Run commands from the `assessment/` folder; no `PYTHONPATH` setup is needed. Usage examples below
 assume an activated venv.
 
+**To try it interactively**, once the index is built:
+
+```bash
+uv run python -m rag          # interactive Q&A loop; "exit", an empty line or Ctrl-C to quit
+```
+
+Type a question and it answers with citations, a support status and the passages it used. Add
+`--full` to print whole passages instead of snippets, or use `python -m rag ask "..."` for one-shot
+questions.
+
 When adding a dependency, add it to `requirements.txt`, then run `uv add -r requirements.txt` to
 update `pyproject.toml` and `uv.lock`.
 
