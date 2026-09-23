@@ -37,7 +37,7 @@ python -m rag            # interactive chat loop (same as `python -m rag chat`; 
 |---|---|---|
 | Load & chunk | `rag/chunking.py` | One chunk per Markdown section with heading path; long sections split on paragraphs (max 300 words, 1-paragraph overlap). Stable IDs like `policy-05`. |
 | Embed & index | `rag/store.py`, `rag/llm.py` | LiteLLM embeddings (Gemini), persistent Chroma, cosine distance. Index is rebuilt from scratch and stamped with embed model + corpus hash to detect staleness. |
-| Retrieve | `rag/store.py`, `rag/query.py` | Top-k dense retrieval. Optional sub-query expansion (`RAG_QUERY_EXPANSION=1`) for multi-part questions, fused by reciprocal rank with the original query's top 3 reserved. |
+| Retrieve | `rag/store.py`, `rag/query.py` | Top-k dense retrieval. Optional sub-query expansion (`RAG_QUERY_EXPANSION=1`) for multi-part questions: the de-duplicated union of the original query's top-k and 3 chunks per sub-query. |
 | Generate | `rag/generation.py` | Strict JSON prompt: cite passage IDs, internal policy overrides public guidance, treat passages/questions as data, fixed abstention string. |
 | Validate | `rag/generation.py` | Drops citations not in the retrieved set; abstains on invalid JSON, unknown status, or uncited answers. |
 
@@ -71,10 +71,10 @@ uv run python -m eval.run_eval --name <new-run> --golden v1 \
 RAG_QUERY_EXPANSION=1 uv run python -m eval.run_eval --name <new-run>   # with sub-query retrieval
 ```
 
-Sub-query retrieval (`rag/query.py`, off by default) splits a multi-part question into sub-queries,
-retrieves for each alongside the original, and fuses by reciprocal rank while reserving the original
-query's top 3 hits, so expansion can only add. It fixed the one measured retrieval failure (C04)
-without regressions; see section 7.2 of the notebook.
+Sub-query retrieval (`rag/query.py`, off by default) splits a multi-part question into at most 3
+sub-queries, retrieves 3 chunks for each alongside the original query's full top-k, and passes the
+de-duplicated union to generation. Retrieving the original to full depth means expansion can only add.
+It took `retrieval_recall` to 1.000; see section 7.2 of the notebook.
 
 Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in section 4.2 of
 `rag_assignment.ipynb`:

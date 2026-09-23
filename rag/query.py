@@ -1,6 +1,6 @@
 """Sub-query expansion: turn a multi-part question into several retrieval queries.
 
-Why this exists (measured in section 7.1 of the notebook): a question with two parts needs passages
+Why this exists (measured in section 6.1 of the notebook): a question with two parts needs passages
 from two regions of the embedding space, and one query is one vector. C04 ("must we notify, *and
 what determines that*") ranked the passage holding the notifiability criteria 8th; asked on its own
 that passage ranks 1st. Rewriting into a single better query does not help, because it only moves
