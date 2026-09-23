@@ -3,6 +3,18 @@
 Answers questions using only the four Markdown documents in `documents/` (README.md is not indexed),
 with passage citations and a support status (`supported` / `partially supported` / `not supported`).
 
+**Start with [`rag_assignment.ipynb`](rag_assignment.ipynb).** The notebook is the deliverable; this
+repository is built to support it rather than to be read alongside it. The code lives in the modules
+(`rag/`, `eval/`) so the same implementation runs in the CLI, in the evaluation and in the notebook,
+and every result is read from a committed run in `eval/results/` rather than recomputed. This README
+covers setup and the module layout; the reasoning, evaluation and findings are in the notebook.
+
+**On the repository layout.** The brief asks for reasoning about retrieval, grounding and evaluation
+rather than for production engineering, so effort went there instead of into structure. The result is
+two flat packages, no src layout, no packaging, no test suite and no CI. That is a deliberate scope
+choice, not an oversight: section 9 of the notebook sets out what the engineering side would need
+before this served real users.
+
 ## Setup
 
 Python 3.12. Direct dependencies are pinned in `requirements.txt`; `uv.lock` additionally pins
