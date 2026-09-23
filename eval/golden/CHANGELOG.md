@@ -31,7 +31,7 @@ To re-score an existing run's answers on a newer version without regenerating th
 ## v1 - applied after reviewing run 01
 
 Each change is justified against the source documents, not against any answer. Scored as runs
-`02-golden-v1` (13/20 -> 16/20) and `03-coverage-metric` (17/20).
+`02-golden-v1` (13/20 -> 16/20) and `archive-coverage-metric` (17/20).
 
 - **C09** reference: restore "clinical" - `policy-07` reads "a formal clinical governance process".
 - **C05** reference: scoped to the question; dropped the notification-contents sentence.
