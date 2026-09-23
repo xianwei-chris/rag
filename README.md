@@ -76,7 +76,7 @@ sub-queries, retrieves 3 chunks for each alongside the original query's full top
 de-duplicated union to generation. Retrieving the original to full depth means expansion can only add.
 It took `retrieval_recall` to 1.000; see section 7.2 of the notebook.
 
-Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in section 4.2 of
+Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in section 5.2 of
 `rag_assignment.ipynb`:
 
 - deterministic (quote matching, no LLM): `status_correct` (gates), `retrieval_recall` and
