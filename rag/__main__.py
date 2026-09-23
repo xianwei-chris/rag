@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import select
 import sys
 import textwrap
 
@@ -42,13 +43,30 @@ def print_result(result: RagResult, full: bool = False, snippet_chars: int = 300
     print()
 
 
+def read_question(prompt: str = "\nQ> ") -> str:
+    """Read one question, joining the extra lines a multi-line paste delivers in one go.
+
+    A pasted question arrives as several lines at once, and `input()` takes only the first: the rest
+    would then run as a second question, costing an API call and confusing the answer. Anything still
+    waiting on stdin immediately after the first line came from the same paste, not from a person
+    typing, so it belongs to the same question.
+    """
+    parts = [input(prompt).strip()]
+    while select.select([sys.stdin], [], [], 0)[0]:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        parts.append(line.strip())
+    return " ".join(part for part in parts if part)
+
+
 def chat_loop(pipeline: RagPipeline, model: str, k: int | None, full: bool) -> int:
     print(f"RAG chat ({model})\n")
     print(textwrap.fill(GREETING, 96).replace("\n ", "\n"))
     print("\nType 'exit', an empty line or Ctrl-C to quit.")
     while True:
         try:
-            question = input("\nQ> ").strip()
+            question = read_question()
         except (EOFError, KeyboardInterrupt):
             print()
             break
