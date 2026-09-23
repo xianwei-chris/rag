@@ -74,7 +74,7 @@ RAG_QUERY_EXPANSION=1 uv run python -m eval.run_eval --name <new-run>   # with s
 Sub-query retrieval (`rag/query.py`, off by default) splits a multi-part question into sub-queries,
 retrieves for each alongside the original, and fuses by reciprocal rank while reserving the original
 query's top 3 hits, so expansion can only add. It fixed the one measured retrieval failure (C04)
-without regressions; see section 8.3 of the notebook.
+without regressions; see section 7.2 of the notebook.
 
 Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in section 4.2 of
 `rag_assignment.ipynb`:
@@ -91,7 +91,7 @@ Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in se
 `recall` mode excludes false positives, so an answer is not marked down for stating more than the
 reference. Known weakness: RAGAS takes TP and FN from two different claim decompositions, so both can
 fall to zero together and score 0.00 for an answer that states every reference claim. An exact 0.0 is
-treated as suspect and checked against the claims. See section 7.3 of the notebook.
+treated as suspect and checked against the claims. See section 6 of the notebook.
 
 ### Notebook
 
