@@ -37,7 +37,7 @@ python -m rag            # interactive chat loop (same as `python -m rag chat`; 
 |---|---|---|
 | Load & chunk | `rag/chunking.py` | One chunk per Markdown section with heading path; long sections split on paragraphs (max 300 words, 1-paragraph overlap). Stable IDs like `policy-05`. |
 | Embed & index | `rag/store.py`, `rag/llm.py` | LiteLLM embeddings (Gemini), persistent Chroma, cosine distance. Index is rebuilt from scratch and stamped with embed model + corpus hash to detect staleness. |
-| Retrieve | `rag/store.py` | Top-k dense retrieval. |
+| Retrieve | `rag/store.py`, `rag/query.py` | Top-k dense retrieval. Optional sub-query expansion (`RAG_QUERY_EXPANSION=1`) for multi-part questions, fused by reciprocal rank with the original query's top 3 reserved. |
 | Generate | `rag/generation.py` | Strict JSON prompt: cite passage IDs, internal policy overrides public guidance, treat passages/questions as data, fixed abstention string. |
 | Validate | `rag/generation.py` | Drops citations not in the retrieved set; abstains on invalid JSON, unknown status, or uncited answers. |
 
@@ -68,7 +68,13 @@ uv run python -m eval.run_eval --name 01-fc90 --regate \
     --reuse-answers eval/results/01-baseline-k5             # re-apply gates to stored scores, no LLM calls
 uv run python -m eval.run_eval --name <new-run> --golden v1 \
     --reuse-answers eval/results/<old-run>                # re-score old answers on a new golden set
+RAG_QUERY_EXPANSION=1 uv run python -m eval.run_eval --name <new-run>   # with sub-query retrieval
 ```
+
+Sub-query retrieval (`rag/query.py`, off by default) splits a multi-part question into sub-queries,
+retrieves for each alongside the original, and fuses by reciprocal rank while reserving the original
+query's top 3 hits, so expansion can only add. It fixed the one measured retrieval failure (C04)
+without regressions; see section 8.3 of the notebook.
 
 Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in section 4.2 of
 `rag_assignment.ipynb`:
@@ -76,11 +82,16 @@ Metrics and pass/fail gates are defined in `eval/scoring.py` and explained in se
 - deterministic (quote matching, no LLM): `status_correct` (gates), `retrieval_recall` and
   `retrieval_precision` (diagnostics; they explain *why* an answer was wrong but do not gate);
 - judged (judge `RAG_JUDGE_MODEL`, default `gemini/gemini-2.5-flash`): `factual_correctness` (RAGAS,
-  `recall` mode, supported questions — gates), `missing_points_named` (partial questions — gates),
-  and `faithfulness` (RAGAS; claims grounded in the retrieved passages — debug only, does not gate);
+  `recall` mode — gates), `missing_points_named` (partial questions — gates), and `faithfulness`
+  (claims grounded in the retrieved passages — debug only, does not gate);
 - `pass`: one gate shape for every question — the right call (`status_correct`) and the right content
-  (per expected status: factual correctness / missing points named / exact abstention string) — with
-  `fail_reasons` stored per question.
+  (per expected status: factual correctness / missing points named / the abstention text, which is
+  emitted in code) — with `fail_reasons` stored per question.
+
+`recall` mode excludes false positives, so an answer is not marked down for stating more than the
+reference. Known weakness: RAGAS takes TP and FN from two different claim decompositions, so both can
+fall to zero together and score 0.00 for an answer that states every reference claim. An exact 0.0 is
+treated as suspect and checked against the claims. See section 7.3 of the notebook.
 
 ### Notebook
 

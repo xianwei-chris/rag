@@ -10,11 +10,28 @@ from rag.store import RetrievedChunk
 
 SUPPORT_STATUSES = ("supported", "partially supported", "not supported")
 
+# "[policy-05]" or "[hc-25, kc-23]" - inline citation markers the model is asked to produce.
+CITATION_MARKER = re.compile(r"\s*\[(?:[a-z]+-\d+)(?:\s*,\s*[a-z]+-\d+)*\]")
+
+
+def strip_citations(text: str) -> str:
+    """Remove inline citation markers for display.
+
+    The markers stay in the stored answer: they force the model to ground each claim as it writes,
+    and they are what lets a reader trace a specific sentence to a passage. But a chunk id such as
+    `anon-28` means nothing to an end user, so the CLI renders the prose without them and lists the
+    resolved sources separately (`RagResult.cited_sources`).
+    """
+    return re.sub(r"\s+([.,;:])", r"\1", CITATION_MARKER.sub("", text)).strip()
+
+
 SYSTEM_PROMPT = f"""You answer questions about data-protection guidance and internal policy \
 using ONLY the context passages provided. You have no other knowledge.
 
 Rules:
 1. Every material claim must come from the passages and cite their IDs, e.g. [policy-05].
+1a. Start with the answer itself. No preamble such as "Based on the provided documents" or \
+"the following applies" - the reader already knows the answer comes from the documents.
 2. Passages marked authority=internal_policy override public_guidance where they are more specific. \
 If the question relies on public guidance that the internal policy restricts, apply the internal policy \
 and say so.

@@ -28,7 +28,28 @@ To re-score an existing run's answers on a newer version without regenerating th
     a paraphrase that drops a qualifier cannot be rescued by an answer that is *more* precise: the
     extra precision earns no credit and the lost qualifier scores as a miss. See C09.
 
-## Backlog for v1
+## v1 - applied after reviewing run 01
+
+Each change is justified against the source documents, not against any answer. Scored as runs
+`02-golden-v1` (13/20 -> 16/20) and `03-coverage-metric` (17/20).
+
+- **C09** reference: restore "clinical" - `policy-07` reads "a formal clinical governance process".
+- **C05** reference: scoped to the question; dropped the notification-contents sentence.
+- **C03** reference: dropped the final compound, which decomposed into two claims each stronger than
+  `hc-25`, a rule requiring both conditions together.
+- **C02** reference: "may be waived only where A, B and C" replaced by the conditions stated
+  separately, because the quantifier form decomposed into one unmatchable claim.
+- **S02** evidence: added `anon-21` ("The guide refers to k values of 3, 5, or more."); reference
+  rewritten to concede what the guide says, then defeat the premise on precedence. `retrieval_recall`
+  correctly drops to 0.5, exposing a miss v0 had hidden.
+- **S01** type: `multi-passage` -> `answerable`. `anon-03` alone contains every reference claim, so
+  the second evidence group originally planned would have been invented.
+- **S10, C06, C07** references now track `ABSTAIN_ANSWER`.
+
+New rule, from C09: **quote the documents' wording where the reference states something they state**.
+Guards in `eval/check_golden.py` enforce the structural part.
+
+## Backlog beyond v1
 
 Found while reviewing run 01 against v0. Not applied: v0 is frozen because run 01 is scored
 against it, and its hash is recorded in `run.json`. These are batched into v1 as one iteration.

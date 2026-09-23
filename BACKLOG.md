@@ -13,6 +13,32 @@ right, every other change is measured against a moving target:
 
 Rejected: raising `top_k` (item 3), and lowering it (item 8).
 
+## Done (runs 02-05)
+
+| Change | Where | Result |
+|---|---|---|
+| Golden v1: reference + evidence fixes | `eval/golden/v1.json` | 13/20 -> 16/20; recall 0.971 -> 0.941 (honest) |
+| `reference_coverage` replaces RAGAS FC as the gate | `eval/scoring.py` | 16/20 -> 17/20; S09 artefact resolved |
+| Sub-query retrieval, original top-3 reserved | `rag/query.py` | C04 recall 0.5 -> 1.0 and now passes; no regressions |
+| Strip citation markers for display; no-preamble rule | `rag/generation.py` | preamble answers 2 -> 0 |
+| Retries on LLM/embedding calls | `rag/llm.py` | a single 503 no longer destroys a whole run |
+| `check_golden` structural + paraphrase-drift guards | `eval/check_golden.py` | would have caught S01 and C09 |
+
+## Still open
+
+- **S02** — the only remaining true system failure. Expansion did not fix it: the fused result
+  returned the same five chunks, because the window is oversubscribed. See item 2.
+- **C09** — the reference's "unless" clause decomposes into an unconditional claim the answer does
+  not make. Same defect class as C02/C03, but fixing it means a v2, and the overfitting risk is
+  real: it is now the only failure whose fix is purely a reference edit.
+- **Modal drift (S08)** — no metric detects it reliably; the faithfulness 0.0 first read as detection
+  turned out to be judge noise (notebook 7.3). Needs a deterministic modal-verb check or a reviewed
+  verdict.
+- **Judge variance** — the same stored answer scored faithfulness 0.0, 0.833 and 1.00 across runs
+  01/02/03. At n=20 this flips one or two verdicts per run, so judged pass rates cannot resolve a
+  one-question improvement. Either enlarge the golden set, average several judge passes, or lean on
+  the deterministic metrics for iteration decisions.
+
 ## 1. Query generation before embedding (measured, partial win)
 
 **Problem.** Two failures are two-part questions where the second part is drowned out of the query

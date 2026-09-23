@@ -13,15 +13,28 @@ Retrieval recall and precision, and faithfulness, are computed but do not gate: 
 diagnostics. Recall in particular explains *why* a wrong answer was wrong, but gating on it
 would double-count, since an answer that needed a missing passage already fails on content.
 
-Ops assumption behind the gates: completeness first. Omitting a required fact is the costly
-error in a compliance setting; extra claims are tolerated. So factual correctness runs in
-RAGAS "recall" mode, TP/(TP+FN), which penalises reference claims the answer omits but not
-extra claims the answer adds.
+Ops assumption behind the gates: completeness first. Omitting a required fact is the costly error
+in a compliance setting; extra claims are tolerated, because an answer that says more than the
+reference is not thereby wrong.
 
-Caveat to watch: RAGAS derives TP from one claim decomposition (response claims entailed by the
-reference) and FN from another (reference claims missing from the response), so an inconsistent
-judge can produce TP=0 with FN=0, which scores 0.0 for a complete answer (seen once on S03 with
-a weaker judge). Treat an exact 0.0 as suspect and check the claims before believing it.
+Factual correctness runs in RAGAS "recall" mode, which excludes false positives by construction, so
+an answer is not marked down for stating more than the reference. Reading its source, that mode is
+TP/(TP+FN) where
+
+    TP = claims of the RESPONSE that the reference entails
+    FN = claims of the REFERENCE that the response does not entail
+
+The numerator counts response claims while the denominator adds reference claims, so the score is
+not the share of the reference that was covered. An answer that covers the reference completely but
+adds extra true material scores *lower*, since few of its claims are entailed by a short reference.
+S09 is the extreme: its answer covers all four reference claims and adds several more, giving TP=0,
+FN=0 and a reproducible 0.0. C09 confirms the formula exactly: TP=3, FN=2, score 0.60.
+
+TP and FN come from two different claim decompositions, so both can fall to zero together and the
+score becomes 0/(0+1e-8) for an answer that in fact states every reference claim. Seen on S09 and on
+C02: decomposing their references by hand and checking each claim against the answer matched every
+one. An exact 0.0 is therefore treated as suspect and checked against the claims before it is
+believed, rather than read as a content failure.
 
 Faithfulness is measured against all retrieved passages, so it checks grounding rather than
 "supported by the cited passage". Citations themselves are validated in rag/generation.py,
@@ -39,7 +52,7 @@ from rag.config import ABSTAIN_ANSWER
 # Thresholds for the judged gates. Judge scores vary between runs, so these are starting
 # points to be calibrated against manual review, not exact requirements.
 FACTUAL_CORRECTNESS_MIN = 0.9  # references are short (2-6 claims), so this means "every reference claim"
-FACTUAL_CORRECTNESS_MODE = "recall"  # TP/(TP+FN): penalises omissions, not extra claims
+FACTUAL_CORRECTNESS_MODE = "recall"  # TP/(TP+FN): the gate metric
 
 DETERMINISTIC = ["status_correct", "retrieval_recall", "retrieval_precision"]
 JUDGED = ["faithfulness", "factual_correctness", "missing_points_named"]
@@ -92,8 +105,8 @@ def make_judge(model: str):
 def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[str, dict]:
     """faithfulness: share of answer claims supported by the retrieved passages
          (answers that make claims, i.e. expected supported/partial).
-    factual_correctness: RAGAS claim-level score against the reference, `recall` mode
-         (expected supported and partial). Gate metric.
+    factual_correctness: RAGAS FactualCorrectness against the reference, `recall` mode (expected
+         supported and partial). Gate metric.
     missing_points_named: share of `missing_points` the answer or its missing_information
          states as unsupported (expected partial only)."""
     from ragas import EvaluationDataset, RunConfig, evaluate
@@ -154,7 +167,7 @@ def judged_scores(golden: list[dict], answers: dict[str, dict], judge) -> dict[s
     ]
     run(FactualCorrectness(mode=FACTUAL_CORRECTNESS_MODE), "factual_correctness", reference_rows)
 
-    checker = FactualCorrectness(llm=judge)  # used only for its NLI primitive
+    checker = FactualCorrectness(llm=judge)  # used only for its claim/NLI primitives
 
     async def points_named(item: dict) -> float:
         """Share of missing_points the answer states as unsupported."""

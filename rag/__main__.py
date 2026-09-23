@@ -19,7 +19,7 @@ from rag.pipeline import RagPipeline, RagResult
 
 
 def print_result(result: RagResult, full: bool = False, snippet_chars: int = 300) -> None:
-    print(f"\nAnswer:\n{textwrap.fill(result.answer, 100)}\n")
+    print(f"\nAnswer:\n{textwrap.fill(result.display_answer(), 100)}\n")
     print(f"Support status: {result.support_status}")
     print("Citations:" + ("" if result.citations else " -"))
     for line in result.cited_sources():

@@ -32,6 +32,9 @@ class Settings:
     top_k: int = int(os.getenv("RAG_TOP_K", "5"))
     max_chunk_words: int = int(os.getenv("RAG_MAX_CHUNK_WORDS", "300"))
     temperature: float = float(os.getenv("RAG_TEMPERATURE", "0"))
+    # Expand a multi-part question into sub-queries before retrieving (rag/query.py). Off by
+    # default so the baseline is reproducible; RAG_QUERY_EXPANSION=1 turns it on.
+    query_expansion: bool = os.getenv("RAG_QUERY_EXPANSION", "0") == "1"
 
 
 def get_settings() -> Settings:

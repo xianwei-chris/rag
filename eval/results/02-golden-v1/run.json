@@ -1,0 +1,41 @@
+{
+  "golden_version": "v1",
+  "golden_hash": "ed841a00b676",
+  "question_ids": [
+    "S01",
+    "S02",
+    "S03",
+    "S04",
+    "S05",
+    "S06",
+    "S07",
+    "S08",
+    "S09",
+    "S10",
+    "C01",
+    "C02",
+    "C03",
+    "C04",
+    "C05",
+    "C06",
+    "C07",
+    "C08",
+    "C09",
+    "C10"
+  ],
+  "judge_model": "gemini/gemini-2.5-flash",
+  "gates": {
+    "factual_correctness_min": 0.9,
+    "factual_correctness_mode": "recall"
+  },
+  "generation": {
+    "llm_model": "gemini/gemini-3.5-flash",
+    "embed_model": "gemini/gemini-embedding-001",
+    "top_k": 5,
+    "max_chunk_words": 300,
+    "prompt_hash": "03c2af6e3577",
+    "git_commit": null,
+    "code_dirty": null,
+    "answers_from": "01-baseline-k5"
+  }
+}

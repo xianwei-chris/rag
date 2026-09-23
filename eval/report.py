@@ -65,6 +65,7 @@ class Run:
         return {
             "golden_version": self.info["golden_version"],
             "top_k": gen["top_k"],
+            "query_expansion": gen.get("query_expansion", False),
             "llm_model": gen["llm_model"],
             "embed_model": gen["embed_model"],
             "judge_model": self.info["judge_model"],
@@ -183,6 +184,42 @@ def passages(answer: dict, chars: int = 400, cited_only: bool = False) -> str:
     )
 
 
+def required_evidence(item: dict) -> str:
+    """The golden set's required quotes, exactly as stored: one block per group.
+
+    Every group must be retrieved; any one quote within a group satisfies it, so the options in a
+    group are alternatives (the same fact stated in different documents).
+    """
+    lines = []
+    for n, group in enumerate(item["required_evidence"], 1):
+        lines.append(f"group {n}:" + (" (any one of)" if len(group) > 1 else ""))
+        lines += [f'    {ev["source"]}: "{ev["quote"]}"' for ev in group]
+    return "\n".join(lines)
+
+
+def evidence_check(item: dict, answer: dict) -> str:
+    """`required_evidence` with each group marked HIT/MISS for THIS RUN, and the chunk that matched.
+
+    Not a table column: this is what `retrieval_recall` counts, shown per group. Call it directly
+    when a recall score needs explaining, e.g. evidence_check(run.golden["C04"], run.answers["C04"]).
+    """
+    from eval.evidence import quote_in
+
+    lines = []
+    for n, group in enumerate(item["required_evidence"], 1):
+        found = {
+            id(ev): next(
+                (c["chunk_id"] for c in answer["retrieved"]
+                 if c["source"] == ev["source"] and quote_in(ev["quote"], c["text"])),
+                None,
+            )
+            for ev in group
+        }
+        lines.append(f"group {n}: {'HIT' if any(found.values()) else 'MISS'}")
+        lines += [f'    [{found[id(ev)] or "--"}] {ev["source"]}: "{ev["quote"][:160]}"' for ev in group]
+    return "\n".join(lines)
+
+
 def review_table(run: Run, review: dict[str, dict] | None = None, chars: int = 400) -> pd.DataFrame:
     """Everything about each question in one row, for reading the run and recording a verdict.
 
@@ -205,6 +242,7 @@ def review_table(run: Run, review: dict[str, dict] | None = None, chars: int = 4
                 "expected_status": item["expected_status"],
                 "predicted_status": answer["support_status"],
                 "reference": item.get("reference"),
+                "required_evidence": required_evidence(item) or None,
                 "missing_points": "; ".join(item.get("missing_points") or []) or None,
                 "answer": answer["answer"],
                 "missing_information": answer["missing_information"],
@@ -264,8 +302,10 @@ def compare_runs(runs: list[Run], metrics: list[str] | None = None) -> pd.DataFr
             run.name: {m: run.summary()["overall"].get(m) for m in metrics}
             | {
                 "top_k": run.config["top_k"],
+                "expansion": run.config["query_expansion"],
                 "golden": run.config["golden_version"],
-                "prompt": run.config["prompt_hash"],
+                "prompt": run.config["prompt_hash"][:6],
+                "answers": run.config["answers_from"] or "fresh",
                 "n": len(run.answers),
             }
             for run in runs

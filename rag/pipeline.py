@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-from rag import llm
+from rag import llm, query
 from rag.config import Settings, get_settings
-from rag.generation import build_messages, parse_and_validate
+from rag.generation import build_messages, parse_and_validate, strip_citations
 from rag.store import RetrievedChunk, build_index, index_warnings, retrieve
 
 
@@ -18,11 +18,16 @@ class RagResult:
     citations: list[str]
     missing_information: str | None
     retrieved: list[RetrievedChunk]
+    sub_queries: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     raw_output: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def display_answer(self) -> str:
+        """The answer as a user should see it: no internal chunk ids in the prose."""
+        return strip_citations(self.answer)
 
     def cited_sources(self) -> list[str]:
         """Each citation resolved to '[ID] file :: section', in citation order."""
@@ -40,9 +45,21 @@ class RagPipeline:
     def build_index(self) -> int:
         return build_index(self.settings, self._embed)
 
+    def _retrieve(self, question: str, k: int) -> tuple[list[RetrievedChunk], list[str]]:
+        """Retrieve `k` chunks, optionally widening the question into sub-queries first."""
+        chunks = retrieve(question, self.settings, self._embed, k)
+        if not self.settings.query_expansion:
+            return chunks, []
+        subs = query.sub_queries(question, self.settings.llm_model, self.settings.temperature)
+        if not subs:
+            return chunks, []
+        # Retrieve deeper per sub-query so fusion has a ranking to work with, not just k hits.
+        extra = [retrieve(q, self.settings, self._embed, k * 3) for q in subs]
+        return query.fuse(chunks, extra, k), subs
+
     def ask(self, question: str, k: int | None = None) -> RagResult:
         warnings = index_warnings(self.settings)
-        chunks = retrieve(question, self.settings, self._embed, k or self.settings.top_k)
+        chunks, subs = self._retrieve(question, k or self.settings.top_k)
         raw = llm.complete_json(
             build_messages(question, chunks), self.settings.llm_model, self.settings.temperature
         )
@@ -50,6 +67,7 @@ class RagPipeline:
         return RagResult(
             question=question,
             retrieved=chunks,
+            sub_queries=subs,
             warnings=warnings + validation_warnings,
             raw_output=raw,
             **result,

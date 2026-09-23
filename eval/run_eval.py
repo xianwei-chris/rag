@@ -95,6 +95,7 @@ def main() -> None:
             "embed_model": settings.embed_model,
             "top_k": settings.top_k,
             "max_chunk_words": settings.max_chunk_words,
+            "query_expansion": settings.query_expansion,
             "prompt_hash": sha256_short(SYSTEM_PROMPT),
             **git_state(),
         }
